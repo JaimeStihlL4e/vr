@@ -26,7 +26,7 @@ Código propio previsto: el `index.html` de la escena, el guion de la rutina com
 
 **WebXR no sustituye a Three.js ni a A-Frame.** Es la API del navegador que da acceso al visor (pose de la cabeza, render estéreo); no dibuja nada por sí sola y siempre necesita un motor de render encima. Lo que sustituye al conjunto Vite + TypeScript + Three.js es A-Frame, que trae ese motor incluido y además habla WebXR por nosotros.
 
-Y el dato que condiciona todo el plan: **`immersive-vr` no está soportado en teléfonos**. Chrome en Android expone WebXR, pero orientado a AR y *magic window*, no a sesión VR con gafas pasivas — la era del VR con Cardboard se dio por cerrada en el navegador. Por eso el plan **empieza comprobándolo en el móvil concreto** en lugar de asumir una respuesta: si hay sesión nativa, A-Frame la usa sin más; si no, el webxr-polyfill la emula y A-Frame no nota la diferencia. En ambos casos el resto del plan es idéntico, que es justo lo que hace barata la comprobación.
+Sobre el soporte de `immersive-vr` en teléfonos circula la idea de que se dio por cerrado con el fin de la era Cardboard. **La Fase 0 demuestra que no es así en el dispositivo de pruebas**: Chrome 153 sobre Android da sesión VR nativa, sin polyfill. Por eso el plan empieza comprobándolo en el móvil concreto en lugar de fiarse de la documentación: si hay sesión nativa, A-Frame la usa sin más; si no la hubiera, el webxr-polyfill la emula y A-Frame no nota la diferencia. En ambos casos el resto del plan es idéntico, que es justo lo que hace barata la comprobación.
 
 ## Lo que el prototipo debe demostrar
 
@@ -46,17 +46,24 @@ Medición de los movimientos del usuario, historial de sesiones, base de datos, 
 
 Cinco pasos, en orden. Cada uno deja algo probado en el móvil real.
 
-### Fase 0 — Prueba de capacidades en el móvil (10 minutos)
+### Fase 0 — Prueba de capacidades en el móvil ✅ COMPLETADA
 
-- [ ] Un solo `test.html`, subido a la URL pública, que informe en pantalla de:
-  - `navigator.xr?.isSessionSupported('immersive-vr')` y `'immersive-ar'`
-  - si el polyfill consigue una sesión cuando el nativo dice que no
-  - permiso y lectura del giroscopio
-  - `SpeechSynthesis` disponible y voces `es-ES` instaladas
+- [x] `test.html` desplegado y ejecutado en el dispositivo de pruebas
 
-**Por qué primero:** decide si hace falta el polyfill, confirma que la voz en español existe en ese teléfono, y descarta de golpe los tres riesgos que podrían hundir el prototipo — antes de escribir una línea de la aplicación.
+**Resultados** (Chrome 153, Android, Adreno 650 / Snapdragon 865, pantalla 393×873 @2.75x):
 
-**Aceptación:** una captura de la pantalla de resultados desde el móvil de pruebas.
+| Comprobación | Resultado | Consecuencia |
+|---|---|---|
+| `immersive-vr` **nativo** | **soportado** | No hace falta polyfill. A-Frame entra en VR por la vía estándar |
+| `immersive-ar` nativo | soportado | El dispositivo tiene ARCore; abre la puerta a una variante en AR más adelante |
+| Sesión VR real | abierta y cerrada, **2 vistas** | El estéreo funciona de verdad, no solo la declaración de soporte |
+| Polyfill | cargado, cede ante el nativo | Queda como red de seguridad para otros dispositivos, sin coste |
+| Giroscopio | permiso concedido, eventos recibidos | Disponible, aunque con sesión nativa el tracking lo gestiona Chrome |
+| Voces `es-ES` | 2 (es_ES, es_US), reproducción completada | La voz del terapeuta es viable sin grabar audio |
+| Pantalla completa + bloqueo horizontal | ambos correctos | La PWA puede ocupar la pantalla sin interfaz de navegador |
+| WebGL 2 | disponible | Margen de sobra para la escena prevista |
+
+**Conclusión:** los tres riesgos que podían hundir el prototipo quedan descartados. El camino es WebXR nativo, sin emulación.
 
 ### Fase 1 — Esqueleto A-Frame, PWA instalable y desplegada
 
@@ -71,9 +78,11 @@ Cinco pasos, en orden. Cada uno deja algo probado en el móvil real.
 
 ### Fase 2 — Entrar en VR en el móvil
 
-- [ ] Cargar `webxr-polyfill` condicionalmente, según lo aprendido en la Fase 0
-- [ ] El botón "Entrar en VR" resuelve todo en un único gesto de usuario: permiso de giroscopio (obligatorio en iOS), pantalla completa, bloqueo en horizontal, `scene.enterVR()` y *warm-up* del sintetizador de voz — que sin gesto previo queda mudo en móvil
-- [ ] Ajuste de la separación interocular si el encaje con el adaptador lo pide, y recentrado de la vista
+*Simplificada tras la Fase 0: con sesión nativa disponible, A-Frame entra en VR por sí solo y el polyfill sale del camino crítico.*
+
+- [ ] El botón "Entrar en VR" resuelve todo en un único gesto de usuario: `scene.enterVR()`, pantalla completa, bloqueo en horizontal y *warm-up* del sintetizador de voz — que sin gesto previo queda mudo en móvil
+- [ ] `webxr-polyfill` cargado solo si `isSessionSupported('immersive-vr')` devuelve `false`, como red de seguridad para otros dispositivos. Sin esfuerzo de desarrollo si no se activa
+- [ ] Comprobar el encaje con el adaptador: nitidez, separación interocular y recentrado de la vista
 
 **Aceptación:** con el móvil en el adaptador se ve estéreo cómodo, mirar alrededor responde sin deriva y se sale sin reiniciar.
 
@@ -111,8 +120,9 @@ Si un tercero completa esos seis pasos sin ayuda, el prototipo ha cumplido su fu
 
 ## Riesgos y cómo se cubren
 
-- **El polyfill lleva años sin mantenimiento activo.** Es el punto frágil del plan. La Fase 0 lo prueba antes de depender de él; si fallara, el plan B es el `StereoEffect` de Three.js accesible desde A-Frame: más trabajo, pero acotado.
-- **La voz sintética se comporta de forma irregular en iOS.** Cubierto por los subtítulos permanentes desde el primer momento.
+- ~~**El polyfill lleva años sin mantenimiento activo.**~~ **Descartado en la Fase 0:** el dispositivo de pruebas da sesión `immersive-vr` nativa, así que el prototipo no depende del polyfill. Sigue cargado como red de seguridad para otros teléfonos, pero un fallo suyo ya no bloquea nada.
+- **La voz sintética se comporta de forma irregular en iOS.** Cubierto por los subtítulos permanentes desde el primer momento. El dispositivo de pruebas es Android y ya se ha verificado que reproduce español correctamente.
+- **Un solo dispositivo probado.** Todo lo anterior está confirmado en un Snapdragon 865 con Chrome. Un teléfono de gama media o un iPhone pueden comportarse de otro modo; la Fase 4 contempla probar en un segundo móvil.
 - **Cinetosis.** La cámara nunca se desplaza por código: todo el movimiento lo genera el usuario. Sesión corta y modo sentado.
 
 ## Ritmo de trabajo

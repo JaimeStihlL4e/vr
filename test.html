@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diagnóstico VR — Fase 0</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px 16px 48px;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #12141a; color: #e8eaf0;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 8px; color: #9aa3b8;
+       text-transform: uppercase; letter-spacing: .06em; }
+  p.lead { margin: 0 0 8px; color: #9aa3b8; font-size: 14px; }
+  .card { background: #1b1e26; border: 1px solid #2a2f3c; border-radius: 10px;
+          padding: 4px 12px; margin-bottom: 8px; }
+  .row { display: flex; gap: 10px; align-items: baseline;
+         padding: 9px 0; border-bottom: 1px solid #262b36; }
+  .row:last-child { border-bottom: 0; }
+  .row .k { flex: 1 1 auto; min-width: 0; color: #c2c8d6; font-size: 14px; }
+  .row .v { flex: 0 0 auto; font-weight: 600; font-size: 14px;
+            text-align: right; word-break: break-word; max-width: 60%; }
+  .ok   { color: #5ad48b; }
+  .bad  { color: #ff7a7a; }
+  .warn { color: #ffc861; }
+  .info { color: #86b7ff; }
+  .muted{ color: #7c8497; font-weight: 400; }
+  button {
+    display: block; width: 100%; margin: 8px 0;
+    padding: 14px 16px; font-size: 16px; font-weight: 600;
+    background: #2f6df6; color: #fff; border: 0; border-radius: 10px;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  button.secondary { background: #2a2f3c; color: #dce1ec; }
+  button:disabled { opacity: .45; }
+  pre { background: #0d0f14; border: 1px solid #262b36; border-radius: 8px;
+        padding: 10px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  #xrcanvas { display: none; position: fixed; inset: 0;
+              width: 100%; height: 100%; z-index: 99; background: #000; }
+  .note { font-size: 13px; color: #7c8497; margin: 6px 0 0; }
+  code { background: #0d0f14; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Diagnóstico VR — Fase 0</h1>
+<p class="lead">Comprueba si este móvil puede con el prototipo. Recorre las secciones de arriba abajo.</p>
+
+<h2>1 · Entorno</h2>
+<div class="card" id="env"></div>
+
+<h2>2 · WebXR nativo</h2>
+<div class="card" id="native"></div>
+<p class="note">Si <code>immersive-vr</code> sale como no soportado, es lo esperado en un teléfono: lo resuelve el paso 3.</p>
+
+<h2>3 · Polyfill (Cardboard)</h2>
+<div class="card" id="poly"></div>
+<button id="btn-poly">Cargar polyfill y reintentar</button>
+<button id="btn-session" class="secondary" disabled>Abrir sesión VR de prueba</button>
+<p class="note">La sesión muestra dos mitades de color que cambian al girar la cabeza. Toca la pantalla para salir.</p>
+
+<h2>4 · Giroscopio</h2>
+<div class="card" id="gyro"></div>
+<button id="btn-gyro">Activar giroscopio</button>
+
+<h2>5 · Voz en español</h2>
+<div class="card" id="voice"></div>
+<button id="btn-voice">Probar voz</button>
+
+<h2>6 · Pantalla completa</h2>
+<div class="card" id="fs"></div>
+<button id="btn-fs" class="secondary">Probar pantalla completa + horizontal</button>
+
+<h2>Resultados</h2>
+<button id="btn-copy" class="secondary">Copiar informe</button>
+<pre id="report">—</pre>
+
+<canvas id="xrcanvas"></canvas>
+
+<script>
+(function () {
+  'use strict';
+
+  var results = {};
+
+  function set(section, key, value, state) {
+    var box = document.getElementById(section);
+    var id = section + '-' + key.replace(/\W+/g, '_');
+    var row = document.getElementById(id);
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'row';
+      row.id = id;
+      row.innerHTML = '<span class="k"></span><span class="v"></span>';
+      box.appendChild(row);
+    }
+    row.querySelector('.k').textContent = key;
+    var v = row.querySelector('.v');
+    v.textContent = value;
+    v.className = 'v ' + (state || 'info');
+    results[section + ' / ' + key] = value;
+    renderReport();
+  }
+
+  function renderReport() {
+    var lines = [];
+    for (var k in results) lines.push(k + ': ' + results[k]);
+    document.getElementById('report').textContent = lines.join('\n');
+  }
+
+  // ---------- 1 · Entorno ----------
+  set('env', 'Navegador', navigator.userAgent, 'muted');
+  set('env', 'Contexto seguro (HTTPS)', window.isSecureContext ? 'sí' : 'NO',
+      window.isSecureContext ? 'ok' : 'bad');
+  set('env', 'Pantalla', screen.width + '×' + screen.height +
+      ' @ ' + (window.devicePixelRatio || 1) + 'x', 'muted');
+  set('env', 'Táctil', ('ontouchstart' in window) ? 'sí' : 'no', 'muted');
+  try {
+    var probe = document.createElement('canvas');
+    var gl2 = probe.getContext('webgl2');
+    var glAny = gl2 || probe.getContext('webgl');
+    if (glAny) {
+      var dbg = glAny.getExtension('WEBGL_debug_renderer_info');
+      set('env', 'GPU', dbg ? glAny.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
+                            : glAny.getParameter(glAny.RENDERER), 'muted');
+      set('env', 'WebGL', gl2 ? 'WebGL 2' : 'WebGL 1', 'ok');
+    } else {
+      set('env', 'WebGL', 'NO disponible', 'bad');
+    }
+  } catch (e) {
+    set('env', 'WebGL', 'error: ' + e.message, 'bad');
+  }
+
+  // ---------- 2 · WebXR nativo ----------
+  function checkSupport(prefix, mode) {
+    if (!navigator.xr) {
+      set(prefix, mode, 'sin navigator.xr', 'bad');
+      return Promise.resolve(false);
+    }
+    return navigator.xr.isSessionSupported(mode).then(function (yes) {
+      set(prefix, mode, yes ? 'soportado' : 'no soportado', yes ? 'ok' : 'warn');
+      return yes;
+    }).catch(function (e) {
+      set(prefix, mode, 'error: ' + e.message, 'bad');
+      return false;
+    });
+  }
+
+  set('native', 'navigator.xr', navigator.xr ? 'presente' : 'AUSENTE',
+      navigator.xr ? 'ok' : 'warn');
+  checkSupport('native', 'immersive-vr');
+  checkSupport('native', 'immersive-ar');
+
+  // ---------- 3 · Polyfill ----------
+  var POLYFILL_URL = 'https://cdn.jsdelivr.net/npm/webxr-polyfill@2.0.3/build/webxr-polyfill.min.js';
+
+  document.getElementById('btn-poly').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Cargando…';
+    var s = document.createElement('script');
+    s.src = POLYFILL_URL;
+    s.onload = function () {
+      try {
+        var pf = new WebXRPolyfill({ cardboard: true, allowCardboardOnDesktop: true });
+        set('poly', 'Polyfill cargado',
+            'sí (' + (pf.injected ? 'inyectado' : 'el nativo tiene prioridad') + ')', 'ok');
+      } catch (e) {
+        set('poly', 'Polyfill cargado', 'error: ' + e.message, 'bad');
+      }
+      checkSupport('poly', 'immersive-vr').then(function (yes) {
+        document.getElementById('btn-session').disabled = !yes;
+        btn.textContent = 'Polyfill cargado';
+      });
+    };
+    s.onerror = function () {
+      set('poly', 'Polyfill cargado', 'NO se pudo descargar', 'bad');
+      btn.disabled = false;
+      btn.textContent = 'Reintentar carga del polyfill';
+    };
+    document.head.appendChild(s);
+  });
+
+  // ---------- 3b · Sesión VR real ----------
+  document.getElementById('btn-session').addEventListener('click', function () {
+    var canvas = document.getElementById('xrcanvas');
+    var gl = canvas.getContext('webgl', { xrCompatible: true, antialias: false, alpha: false });
+    if (!gl) { set('poly', 'Sesión VR', 'sin contexto WebGL', 'bad'); return; }
+
+    navigator.xr.requestSession('immersive-vr').then(function (session) {
+      set('poly', 'Sesión VR', 'abierta', 'ok');
+      canvas.style.display = 'block';
+
+      var ended = false;
+      function endSession() {
+        if (!ended) { ended = true; session.end().catch(function () {}); }
+      }
+      canvas.addEventListener('click', endSession);
+      session.addEventListener('end', function () {
+        ended = true;
+        canvas.style.display = 'none';
+        set('poly', 'Sesión VR', 'abierta y cerrada correctamente', 'ok');
+      });
+
+      var compatible = gl.makeXRCompatible ? gl.makeXRCompatible() : Promise.resolve();
+      return compatible.then(function () {
+        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+        return session.requestReferenceSpace('local').catch(function () {
+          return session.requestReferenceSpace('viewer');
+        });
+      }).then(function (refSpace) {
+        var reported = false;
+        session.requestAnimationFrame(function onFrame(t, frame) {
+          if (ended) { return; }
+          session.requestAnimationFrame(onFrame);
+          var pose = frame.getViewerPose(refSpace);
+          var layer = session.renderState.baseLayer;
+          gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+          gl.enable(gl.SCISSOR_TEST);
+          if (!pose) { return; }
+
+          if (!reported) {
+            reported = true;
+            set('poly', 'Vistas (ojos)', String(pose.views.length),
+                pose.views.length === 2 ? 'ok' : 'warn');
+          }
+
+          // El color cambia al girar la cabeza: eso confirma el tracking.
+          var q = pose.views[0].transform.orientation;
+          var yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z),
+                               1 - 2 * (q.y * q.y + q.z * q.z));
+          var shade = 0.25 + 0.45 * (Math.sin(yaw) + 1) / 2;
+
+          for (var i = 0; i < pose.views.length; i++) {
+            var vp = layer.getViewport(pose.views[i]);
+            gl.viewport(vp.x, vp.y, vp.width, vp.height);
+            gl.scissor(vp.x, vp.y, vp.width, vp.height);
+            if (i === 0) { gl.clearColor(shade, 0.18, 0.45, 1); }
+            else { gl.clearColor(0.18, shade, 0.45, 1); }
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
+        });
+      });
+    }).catch(function (e) {
+      set('poly', 'Sesión VR', 'error: ' + e.message, 'bad');
+      document.getElementById('xrcanvas').style.display = 'none';
+    });
+  });
+
+  // ---------- 4 · Giroscopio ----------
+  var hasDOE = ('DeviceOrientationEvent' in window);
+  set('gyro', 'DeviceOrientationEvent', hasDOE ? 'presente' : 'AUSENTE', hasDOE ? 'ok' : 'bad');
+  set('gyro', 'Pide permiso (iOS)',
+      (hasDOE && typeof DeviceOrientationEvent.requestPermission === 'function') ? 'sí' : 'no',
+      'muted');
+
+  document.getElementById('btn-gyro').addEventListener('click', function () {
+    var btn = this;
+    function listen() {
+      var got = false;
+      window.addEventListener('deviceorientation', function (e) {
+        if (!got) {
+          got = true;
+          set('gyro', 'Eventos recibidos', 'sí', 'ok');
+          set('gyro', 'Datos absolutos', e.absolute ? 'sí' : 'no (relativos)',
+              e.absolute ? 'ok' : 'warn');
+          btn.textContent = 'Giroscopio activo — mueve el móvil';
+        }
+        var f = function (n) {
+          return (n === null || n === undefined) ? '—' : n.toFixed(1) + '°';
+        };
+        set('gyro', 'alpha / beta / gamma',
+            f(e.alpha) + ' / ' + f(e.beta) + ' / ' + f(e.gamma), 'info');
+      });
+      setTimeout(function () {
+        if (!got) { set('gyro', 'Eventos recibidos', 'NINGUNO en 3 s', 'bad'); }
+      }, 3000);
+    }
+    if (hasDOE && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission().then(function (state) {
+        set('gyro', 'Permiso', state, state === 'granted' ? 'ok' : 'bad');
+        if (state === 'granted') { listen(); }
+      }).catch(function (e) {
+        set('gyro', 'Permiso', 'error: ' + e.message, 'bad');
+      });
+    } else {
+      set('gyro', 'Permiso', 'no requerido', 'ok');
+      listen();
+    }
+  });
+
+  // ---------- 5 · Voz ----------
+  function listVoices() {
+    if (!('speechSynthesis' in window)) {
+      set('voice', 'SpeechSynthesis', 'AUSENTE', 'bad');
+      return;
+    }
+    set('voice', 'SpeechSynthesis', 'presente', 'ok');
+    var voices = speechSynthesis.getVoices();
+    set('voice', 'Voces totales', String(voices.length), voices.length ? 'info' : 'warn');
+    var es = voices.filter(function (v) { return /^es/i.test(v.lang); });
+    set('voice', 'Voces en español', es.length ? String(es.length) : 'NINGUNA',
+        es.length ? 'ok' : 'bad');
+    if (es.length) {
+      set('voice', 'Disponibles', es.map(function (v) {
+        return v.name + ' (' + v.lang + ')';
+      }).join(', '), 'muted');
+    }
+  }
+  listVoices();
+  if ('speechSynthesis' in window) { speechSynthesis.onvoiceschanged = listVoices; }
+
+  document.getElementById('btn-voice').addEventListener('click', function () {
+    if (!('speechSynthesis' in window)) { return; }
+    var u = new SpeechSynthesisUtterance(
+      'Hola. Soy tu terapeuta virtual. Vamos a empezar con un ejercicio de cuello.');
+    u.lang = 'es-ES';
+    var es = speechSynthesis.getVoices().filter(function (v) { return /^es/i.test(v.lang); });
+    if (es.length) { u.voice = es[0]; }
+    u.onstart = function () { set('voice', 'Reproducción', 'sonando…', 'ok'); };
+    u.onend   = function () { set('voice', 'Reproducción', 'completada', 'ok'); };
+    u.onerror = function (e) { set('voice', 'Reproducción', 'error: ' + e.error, 'bad'); };
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+    setTimeout(function () {
+      if (!speechSynthesis.speaking && !speechSynthesis.pending) {
+        set('voice', 'Reproducción', 'sin respuesta tras 2 s', 'warn');
+      }
+    }, 2000);
+  });
+
+  // ---------- 6 · Pantalla completa ----------
+  var el = document.documentElement;
+  var canFs = !!(el.requestFullscreen || el.webkitRequestFullscreen);
+  set('fs', 'Fullscreen API', canFs ? 'disponible' : 'NO disponible', canFs ? 'ok' : 'bad');
+  set('fs', 'Bloqueo de orientación',
+      (screen.orientation && screen.orientation.lock) ? 'disponible' : 'NO disponible',
+      (screen.orientation && screen.orientation.lock) ? 'ok' : 'warn');
+
+  document.getElementById('btn-fs').addEventListener('click', function () {
+    var req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req) { set('fs', 'Resultado', 'sin API', 'bad'); return; }
+    var p = req.call(el);
+    if (!p || !p.then) { p = Promise.resolve(); }
+    p.then(function () {
+      set('fs', 'Resultado', 'pantalla completa activa', 'ok');
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').then(function () {
+          set('fs', 'Orientación', 'bloqueada en horizontal', 'ok');
+        }).catch(function (e) {
+          set('fs', 'Orientación', 'no se pudo bloquear: ' + e.message, 'warn');
+        });
+      }
+      setTimeout(function () {
+        if (document.exitFullscreen) { document.exitFullscreen(); }
+      }, 3000);
+    }).catch(function (e) {
+      set('fs', 'Resultado', 'error: ' + e.message, 'bad');
+    });
+  });
+
+  // ---------- Informe ----------
+  document.getElementById('btn-copy').addEventListener('click', function () {
+    var txt = document.getElementById('report').textContent;
+    var btn = this;
+    var done = function () {
+      btn.textContent = 'Copiado ✓';
+      setTimeout(function () { btn.textContent = 'Copiar informe'; }, 2000);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(done, function () {});
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done();
+    }
+  });
+})();
+</script>
+</body>
+</html>
